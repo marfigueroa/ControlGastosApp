@@ -1,0 +1,364 @@
+package com.example.controlgastosapp
+
+import android.os.Bundle
+import android.util.Log
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.unit.dp
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FirebaseFirestore
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+
+class MainActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+
+        setContent {
+            PantallaLogin()
+        }
+    }
+}
+
+@Composable
+fun PantallaLogin() {
+    var correo by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+    var mensaje by remember { mutableStateOf("") }
+    var loginExitoso by remember { mutableStateOf(false) }
+
+    val auth = FirebaseAuth.getInstance()
+
+    if (loginExitoso) {
+        PantallaPrincipal()
+        return
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
+        verticalArrangement = Arrangement.Center
+    ) {
+        Text("Control de Gastos", style = MaterialTheme.typography.headlineMedium)
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        OutlinedTextField(
+            value = correo,
+            onValueChange = { correo = it },
+            label = { Text("Correo") },
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        OutlinedTextField(
+            value = password,
+            onValueChange = { password = it },
+            label = { Text("Contraseña") },
+            visualTransformation = PasswordVisualTransformation(),
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        Button(
+            onClick = {
+                if (correo.isNotEmpty() && password.isNotEmpty()) {
+                    auth.signInWithEmailAndPassword(correo.trim(), password.trim())
+                        .addOnCompleteListener { task ->
+                            if (task.isSuccessful) {
+                                Log.d("LOGIN", "LOGIN EXITOSO")
+                                mensaje = "Login exitoso"
+                                loginExitoso = true
+                            } else {
+                                mensaje = "Correo o contraseña incorrectos"
+                                Log.e("LOGIN", "ERROR LOGIN", task.exception)
+                            }
+                        }
+                } else {
+                    mensaje = "Completa correo y contraseña"
+                }
+            },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("Iniciar Sesión")
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        TextButton(
+            onClick = {
+                if (correo.isNotEmpty() && password.isNotEmpty()) {
+                    auth.createUserWithEmailAndPassword(correo.trim(), password.trim())
+                        .addOnCompleteListener { task ->
+                            if (task.isSuccessful) {
+                                mensaje = "Usuario creado correctamente"
+                                Log.d("REGISTER", "Usuario creado")
+                            } else {
+                                mensaje = "Error al crear usuario"
+                                Log.e("REGISTER", "Error registro", task.exception)
+                            }
+                        }
+                } else {
+                    mensaje = "Completa correo y contraseña"
+                }
+            },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("Crear cuenta")
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        Text(mensaje)
+    }
+}
+
+@Composable
+fun PantallaPrincipal() {
+    var nombre by remember { mutableStateOf("") }
+    var monto by remember { mutableStateOf("") }
+    var categoria by remember { mutableStateOf("") }
+    var filtroCategoria by remember { mutableStateOf("") }
+    var mensaje by remember { mutableStateOf("") }
+    var gastos by remember { mutableStateOf(listOf<Pair<String, Map<String, Any>>>()) }
+    var mostrarDialogo by remember { mutableStateOf(false) }
+    var gastoAEliminar by remember { mutableStateOf<String?>(null) }
+    val db = FirebaseFirestore.getInstance()
+    val auth = FirebaseAuth.getInstance()
+    val usuarioId = auth.currentUser?.uid
+    val context = LocalContext.current
+
+    fun cargarGastos() {
+        if (usuarioId != null) {
+            db.collection("gastos")
+                .whereEqualTo("usuarioId", usuarioId)
+                .get()
+                .addOnSuccessListener { result ->
+                    gastos = result.documents.mapNotNull {
+                        val data = it.data
+                        if (data != null) Pair(it.id, data) else null
+                    }
+                }
+                .addOnFailureListener {
+                    mensaje = "Error al cargar gastos"
+                }
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        cargarGastos()
+    }
+
+    val gastosFiltrados = if (filtroCategoria.isEmpty()) {
+        gastos
+    } else {
+        gastos.filter {
+            it.second["categoria"].toString().contains(filtroCategoria, ignoreCase = true)
+        }
+    }
+
+    val mesActual = SimpleDateFormat("yyyy-MM", Locale.getDefault()).format(Date())
+
+    val gastosDelMes = gastosFiltrados.filter {
+        it.second["fecha"].toString().startsWith(mesActual)
+    }
+
+    val total = gastosDelMes.sumOf {
+        (it.second["monto"] as? Number)?.toDouble() ?: 0.0
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp)
+    ) {
+        Text("Registrar gasto", style = MaterialTheme.typography.headlineMedium)
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        Button(
+            onClick = {
+                auth.signOut()
+                (context as? ComponentActivity)?.recreate()
+            },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("Cerrar sesión")
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        OutlinedTextField(
+            value = nombre,
+            onValueChange = { nombre = it },
+            label = { Text("Nombre del gasto") },
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        OutlinedTextField(
+            value = monto,
+            onValueChange = { monto = it },
+            label = { Text("Monto") },
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        OutlinedTextField(
+            value = categoria,
+            onValueChange = { categoria = it },
+            label = { Text("Categoría") },
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        Button(
+            onClick = {
+                val montoDouble = monto.toDoubleOrNull()
+
+                if (nombre.isNotEmpty() && montoDouble != null && categoria.isNotEmpty() && usuarioId != null) {
+                    val gasto = hashMapOf(
+                        "nombre" to nombre,
+                        "monto" to montoDouble,
+                        "categoria" to categoria,
+                        "fecha" to SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date()),
+                        "usuarioId" to usuarioId
+                    )
+
+                    db.collection("gastos")
+                        .add(gasto)
+                        .addOnSuccessListener {
+                            mensaje = "Gasto guardado correctamente"
+                            nombre = ""
+                            monto = ""
+                            categoria = ""
+                            cargarGastos()
+                        }
+                        .addOnFailureListener {
+                            mensaje = "Error al guardar gasto"
+                        }
+                } else {
+                    mensaje = "Completa todos los campos correctamente"
+                }
+            },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("Guardar gasto")
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Text(mensaje)
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        OutlinedTextField(
+            value = filtroCategoria,
+            onValueChange = { filtroCategoria = it },
+            label = { Text("Filtrar por categoría") },
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Text(
+            text = "Total gastado del mes: $${"%.2f".format(total)}",
+            style = MaterialTheme.typography.headlineSmall
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Row(modifier = Modifier.fillMaxWidth()) {
+            Text("Categoría", modifier = Modifier.weight(1f))
+            Text("Nombre", modifier = Modifier.weight(1f))
+            Text("Monto", modifier = Modifier.weight(1f))
+        }
+
+        Divider()
+
+        LazyColumn {
+            items(gastosFiltrados) { (id, gasto) ->
+                Row(modifier = Modifier.fillMaxWidth()) {
+
+                    Text(
+                        text = gasto["categoria"].toString(),
+                        modifier = Modifier.weight(1f)
+                    )
+
+                    Text(
+                        text = gasto["nombre"].toString(),
+                        modifier = Modifier.weight(1f)
+                    )
+
+                    Text(
+                        text = "$${"%.2f".format((gasto["monto"] as? Number)?.toDouble() ?: 0.0)}",
+                        modifier = Modifier.weight(1f)
+                    )
+
+                    Button(
+                        onClick = {
+                            gastoAEliminar = id
+                            mostrarDialogo = true
+                        },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("X")
+                    }
+                }
+
+                Divider()
+            }
+        }
+
+        if (mostrarDialogo && gastoAEliminar != null) {
+            AlertDialog(
+                onDismissRequest = {
+                    mostrarDialogo = false
+                },
+                title = { Text("Confirmar eliminación") },
+                text = { Text("¿Estás seguro de eliminar este gasto?") },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            db.collection("gastos").document(gastoAEliminar!!)
+                                .delete()
+                                .addOnSuccessListener {
+                                    mensaje = "Gasto eliminado"
+                                    cargarGastos()
+                                }
+                                .addOnFailureListener {
+                                    mensaje = "Error al eliminar"
+                                }
+
+                            mostrarDialogo = false
+                            gastoAEliminar = null
+                        }
+                    ) {
+                        Text("Eliminar")
+                    }
+                },
+                dismissButton = {
+                    TextButton(
+                        onClick = {
+                            mostrarDialogo = false
+                            gastoAEliminar = null
+                        }
+                    ) {
+                        Text("Cancelar")
+                    }
+                }
+            )
+        }
+    }
+}
